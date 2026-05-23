@@ -6,8 +6,12 @@ on:
       - "v*.*.*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag (e.g. v1.3.10)"
+      aseprite_tag:
+        description: "Aseprite release tag to build (e.g. v1.3.17), leave empty for latest"
+        required: false
+        type: string
+      release_tag:
+        description: "Tag for this GitHub Release (e.g. v1.3.17)"
         required: true
         type: string
 
@@ -20,22 +24,29 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────
-  # Determine the release tag in all trigger cases
+  # Resolve which Aseprite version to build and
+  # what tag the release should have
   # ──────────────────────────────────────────────
   prepare:
     name: Prepare release info
     runs-on: ubuntu-latest
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      release_tag: ${{ steps.info.outputs.release_tag }}
+      aseprite_ref: ${{ steps.info.outputs.aseprite_ref }}
     steps:
-      - name: Resolve tag
-        id: tag
+      - name: Resolve tags
+        id: info
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            RELEASE_TAG="${{ inputs.release_tag }}"
+            # Use specified Aseprite tag, or fall back to "latest" (empty = default branch)
+            ASEPRITE_REF="${{ inputs.aseprite_tag }}"
           else
-            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+            ASEPRITE_REF=""   # build latest Aseprite main branch on push
           fi
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "aseprite_ref=$ASEPRITE_REF" >> "$GITHUB_OUTPUT"
 
   # ──────────────────────────────────────────────
   # Windows build
@@ -46,10 +57,17 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - name: Checkout source (with submodules)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Clone Aseprite (with submodules)
+        shell: pwsh
+        run: |
+          $ref = "${{ needs.prepare.outputs.aseprite_ref }}"
+          if ($ref -ne "") {
+            git clone --recursive --branch $ref --depth 1 `
+              https://github.com/aseprite/aseprite.git src
+          } else {
+            git clone --recursive --depth 1 `
+              https://github.com/aseprite/aseprite.git src
+          }
 
       - name: Cache Skia
         id: cache-skia-win
@@ -62,7 +80,7 @@ jobs:
         if: steps.cache-skia-win.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $url = "https://github.com/aseprite/skia/releases/latest/download/Skia-Windows-Release-x64.zip"
+          $url = "https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Windows-Release-x64.zip"
           Invoke-WebRequest -Uri $url -OutFile skia.zip
           New-Item -ItemType Directory -Force -Path C:\deps\skia | Out-Null
           Expand-Archive -Path skia.zip -DestinationPath C:\deps\skia
@@ -71,9 +89,9 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          mkdir build
           cmake ^
-            -B build ^
+            -B src\build ^
+            -S src ^
             -G Ninja ^
             -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
             -DLAF_BACKEND=skia ^
@@ -85,15 +103,15 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=x64
-          ninja -C build aseprite
+          ninja -C src\build aseprite
 
       - name: Package
         shell: pwsh
         run: |
           $dest = "aseprite-windows-x64"
           New-Item -ItemType Directory $dest
-          Copy-Item build\bin\aseprite.exe $dest\
-          Copy-Item build\bin\data -Recurse -Destination $dest\data
+          Copy-Item src\build\bin\aseprite.exe $dest\
+          Copy-Item src\build\bin\data -Recurse -Destination $dest\data
           Compress-Archive -Path $dest -DestinationPath aseprite-windows-x64.zip
 
       - name: Upload artifact
@@ -122,10 +140,16 @@ jobs:
             osx_target: "11.0"
 
     steps:
-      - name: Checkout source (with submodules)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Clone Aseprite (with submodules)
+        run: |
+          REF="${{ needs.prepare.outputs.aseprite_ref }}"
+          if [ -n "$REF" ]; then
+            git clone --recursive --branch "$REF" --depth 1 \
+              https://github.com/aseprite/aseprite.git src
+          else
+            git clone --recursive --depth 1 \
+              https://github.com/aseprite/aseprite.git src
+          fi
 
       - name: Cache Skia
         id: cache-skia-mac
@@ -138,7 +162,7 @@ jobs:
         if: steps.cache-skia-mac.outputs.cache-hit != 'true'
         run: |
           curl -L \
-            "https://github.com/aseprite/skia/releases/latest/download/${{ matrix.skia_asset }}" \
+            "https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/${{ matrix.skia_asset }}" \
             -o skia.zip
           mkdir -p ~/deps/skia
           unzip -q skia.zip -d ~/deps/skia
@@ -149,8 +173,9 @@ jobs:
       - name: Configure CMake
         run: |
           SYSROOT=$(xcrun --sdk macosx --show-sdk-path)
-          mkdir build && cd build
           cmake \
+            -B src/build \
+            -S src \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} \
@@ -160,18 +185,17 @@ jobs:
             -DSKIA_DIR=$HOME/deps/skia \
             -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.skia_arch }} \
             -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.skia_arch }}/libskia.a \
-            ${{ matrix.arch == 'arm64' && '-DPNG_ARM_NEON:STRING=on' || '' }} \
-            ..
+            ${{ matrix.arch == 'arm64' && '-DPNG_ARM_NEON:STRING=on' || '' }}
 
       - name: Build
-        run: ninja -C build aseprite
+        run: ninja -C src/build aseprite
 
       - name: Package
         run: |
           dest="aseprite-macos-${{ matrix.arch }}"
           mkdir "$dest"
-          cp build/bin/aseprite "$dest/"
-          cp -r build/bin/data "$dest/data"
+          cp src/build/bin/aseprite "$dest/"
+          cp -r src/build/bin/data "$dest/data"
           zip -r "aseprite-macos-${{ matrix.arch }}.zip" "$dest"
 
       - name: Upload artifact
@@ -189,10 +213,16 @@ jobs:
     runs-on: ubuntu-20.04
 
     steps:
-      - name: Checkout source (with submodules)
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Clone Aseprite (with submodules)
+        run: |
+          REF="${{ needs.prepare.outputs.aseprite_ref }}"
+          if [ -n "$REF" ]; then
+            git clone --recursive --branch "$REF" --depth 1 \
+              https://github.com/aseprite/aseprite.git src
+          else
+            git clone --recursive --depth 1 \
+              https://github.com/aseprite/aseprite.git src
+          fi
 
       - name: Install system dependencies
         run: |
@@ -213,17 +243,18 @@ jobs:
         if: steps.cache-skia-linux.outputs.cache-hit != 'true'
         run: |
           curl -L \
-            "https://github.com/aseprite/skia/releases/latest/download/Skia-Linux-Release-x64-libstdc++.zip" \
+            "https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64-libstdc++.zip" \
             -o skia.zip
           mkdir -p ~/deps/skia
           unzip -q skia.zip -d ~/deps/skia
 
       - name: Configure CMake
+        working-directory: src
         run: |
-          mkdir build && cd build
           export CC=clang
           export CXX=clang++
           cmake \
+            -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_CXX_FLAGS:STRING=-stdlib=libstdc++ \
@@ -232,17 +263,17 @@ jobs:
             -DSKIA_DIR=$HOME/deps/skia \
             -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-x64 \
             -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-x64/libskia.a \
-            ..
+            .
 
       - name: Build
-        run: ninja -C build aseprite
+        run: ninja -C src/build aseprite
 
       - name: Package
         run: |
           dest="aseprite-linux-x86_64"
           mkdir "$dest"
-          cp build/bin/aseprite "$dest/"
-          cp -r build/bin/data "$dest/data"
+          cp src/build/bin/aseprite "$dest/"
+          cp -r src/build/bin/data "$dest/data"
           tar -czf "aseprite-linux-x86_64.tar.gz" "$dest"
 
       - name: Upload artifact
@@ -268,8 +299,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          name: "Aseprite ${{ needs.prepare.outputs.tag }}"
+          tag_name: ${{ needs.prepare.outputs.release_tag }}
+          name: "Aseprite ${{ needs.prepare.outputs.release_tag }}"
           draft: false
           prerelease: false
           generate_release_notes: true
