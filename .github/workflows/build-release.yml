@@ -304,7 +304,7 @@ jobs:
           name: "Aseprite ${{ needs.prepare.outputs.release_tag }}"
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
           files: |
             dist/aseprite-windows-x64/aseprite-windows-x64.zip
             dist/aseprite-macos-x86_64/aseprite-macos-x86_64.zip
