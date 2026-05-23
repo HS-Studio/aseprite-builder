@@ -62,12 +62,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
-            wget unzip cmake g++ libpixman-1-dev libfreetype6-dev libharfbuzz-dev zlib1g-dev \
-            libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev \
-            libcurl4-gnutls-dev  libgif-dev \
-            libgtest-dev libjpeg-dev  libpng-dev \
-            libsdl2-dev libsdl2-image-dev libtinyxml2-dev libnode-dev \
-            ninja-build libarchive-dev  # fix: added missing tools for Linux
+            wget unzip cmake g++ libxrandr-dev libpixman-1-dev libfreetype6-dev \
+            libharfbuzz-dev zlib1g-dev libx11-dev libxcursor-dev libxi-dev \
+            libgl1-mesa-dev libfontconfig1-dev libcurl4-gnutls-dev  libgif-dev \
+            libgtest-dev libjpeg-dev  libpng-dev libsdl2-dev libsdl2-image-dev \
+            libtinyxml2-dev libnode-dev ninja-build libarchive-dev
 
       - uses: actions/checkout@v4
 
