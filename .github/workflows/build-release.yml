@@ -243,7 +243,7 @@ jobs:
         if: steps.cache-skia-linux.outputs.cache-hit != 'true'
         run: |
           curl -L \
-            "https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64-libstdc++.zip" \
+            "https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64.zip" \
             -o skia.zip
           mkdir -p ~/deps/skia
           unzip -q skia.zip -d ~/deps/skia
