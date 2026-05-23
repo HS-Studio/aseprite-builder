@@ -299,6 +299,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ needs.prepare.outputs.release_tag }}
           name: "Aseprite ${{ needs.prepare.outputs.release_tag }}"
           draft: false
