@@ -205,12 +205,12 @@ jobs:
           path: aseprite-macos-${{ matrix.arch }}.zip
 
   # ──────────────────────────────────────────────
-  # Linux build (Ubuntu 20.04 / clang)
+  # Linux build (Ubuntu 22.04 / clang)
   # ──────────────────────────────────────────────
   build-linux:
     name: Build · Linux (x86_64)
     needs: prepare
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Clone Aseprite (with submodules)
